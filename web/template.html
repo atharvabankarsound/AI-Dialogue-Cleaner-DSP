@@ -81,6 +81,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .score b { color: var(--good); font-weight: 500; }
 .scope { position: relative; background: var(--scope); border-radius: 6px; overflow: hidden; }
 .scope canvas { display: block; width: 100%; height: 84px; image-rendering: auto; }
+.scope canvas.wave { height: 64px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
 .head { position: absolute; top: 0; bottom: 0; width: 2px; background: #ffffff; opacity: 0.85; left: 0; pointer-events: none; }
 .axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); }
 
@@ -123,8 +124,8 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
         <span id="msg" role="status">Loading model…</span>
       </div>
       <div class="tracks" id="tracks"></div>
-      <div class="axis mono"><span>0 s</span><span>0 to 8 kHz, low frequencies at the bottom</span><span id="dur"></span></div>
-      <p class="muted" style="font-size:0.85rem">Pick a version to switch while it plays; the position is kept, so you hear the same moment each way. Click a spectrogram to jump. Audio you upload is processed on this device as mono at 16 kHz, first 20 seconds only, and never leaves it.</p>
+      <div class="axis mono"><span>0 s</span><span>Waveform above, spectrogram 0 to 8 kHz below</span><span id="dur"></span></div>
+      <p class="muted" style="font-size:0.85rem">Pick a version to switch while it plays; the position is kept, so you hear the same moment each way. Click a waveform or spectrogram to jump. Waveforms share one vertical scale, so you can see how much each version removes. Audio you upload is processed on this device as mono at 16 kHz, first 20 seconds only, and never leaves it.</p>
     </div>
   </section>
 
@@ -198,6 +199,20 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
     g.putImageData(img, 0, 0);
   }
 
+  // DAW-style waveform: min/max peak per pixel column, all versions on the same vertical scale
+  function drawWave(canvas, x, peak, rgb) {
+    const W = 900, H = 128, mid = H / 2, g = canvas.getContext("2d"), per = x.length / W;
+    canvas.width = W; canvas.height = H;
+    g.fillStyle = "rgba(255,255,255,0.18)"; g.fillRect(0, mid, W, 1);
+    g.fillStyle = "rgb(" + rgb + ")";
+    for (let px = 0; px < W; px++) {
+      let lo = 0, hi = 0;
+      for (let i = Math.floor(px * per), e = Math.max(i + 1, Math.floor((px + 1) * per)); i < e && i < x.length; i++) { const v = x[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      const top = mid - Math.min(1, hi / peak) * (mid - 2), bot = mid - Math.max(-1, lo / peak) * (mid - 2);
+      g.fillRect(px, top, 1, Math.max(1, bot - top));
+    }
+  }
+
   function position() { return playing ? Math.min(duration, ctx.currentTime - startedAt) : offset; }
   function stopNode() { if (node) { node.onended = null; try { node.stop(); } catch (e) {} node = null; } }
   function start() {
@@ -232,11 +247,12 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
       const t0 = performance.now(), r = DC.process(noisy, model), ms = Math.round(performance.now() - t0);
       const base = clean ? DC.siSdr(noisy, clean) : null;
       const defs = [
-        { name: "Noisy input", sub: "The clip before any processing.", x: noisy },
-        { name: "Spectral gate", sub: "DSP only.", x: r.gate },
-        { name: "Hybrid", sub: "DSP plus neural band gains.", x: r.hybrid },
+        { name: "Noisy input", sub: "The clip before any processing.", x: noisy, rgb: "236,128,96" },
+        { name: "Spectral gate", sub: "DSP only.", x: r.gate, rgb: "120,170,240" },
+        { name: "Hybrid", sub: "DSP plus neural band gains.", x: r.hybrid, rgb: "240,170,70" },
       ];
-      if (clean) defs.push({ name: "Clean reference", sub: "The target, before noise was added.", x: clean });
+      if (clean) defs.push({ name: "Clean reference", sub: "The target, before noise was added.", x: clean, rgb: "110,210,170" });
+      let peak = 1e-4; for (let i = 0; i < noisy.length; i++) { const a = Math.abs(noisy[i]); if (a > peak) peak = a; }
       tracksEl.textContent = ""; duration = noisy.length / DC.SR; $("dur").textContent = duration.toFixed(1) + " s";
       tracks = defs.map((d, i) => {
         const el = document.createElement("button"); el.type = "button"; el.className = "track";
@@ -251,10 +267,10 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
           head.append(sc);
         }
         const scope = document.createElement("div"); scope.className = "scope";
-        const cv = document.createElement("canvas"), hd = document.createElement("div"); hd.className = "head";
-        scope.append(cv, hd); el.append(head, scope); tracksEl.append(el); drawSpec(cv, d.x);
+        const wv = document.createElement("canvas"), cv = document.createElement("canvas"), hd = document.createElement("div"); hd.className = "head"; wv.className = "wave";
+        scope.append(wv, cv, hd); el.append(head, scope); tracksEl.append(el); drawWave(wv, d.x, peak, d.rgb); drawSpec(cv, d.x);
         el.addEventListener("click", e => {
-          if (e.target === cv) { const b = cv.getBoundingClientRect(), wasPlaying = playing; offset = (e.clientX - b.left) / b.width * duration; selected = i; if (wasPlaying) start(); else render(); }
+          if (e.target === cv || e.target === wv) { const b = scope.getBoundingClientRect(), wasPlaying = playing; offset = (e.clientX - b.left) / b.width * duration; selected = i; if (wasPlaying) start(); else render(); }
           else select(i);
         });
         return { ...d, el, head: hd, buffer: null };
