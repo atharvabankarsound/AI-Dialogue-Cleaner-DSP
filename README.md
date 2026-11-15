@@ -8,18 +8,9 @@ A dialogue noise-reduction prototype that combines classic DSP with a small neur
 
 ## How it works
 
-```
-noisy audio
-   │
-   ▼  DSP front end      STFT (512 / 128, sqrt-Hann) → 40 mel band energies
-   │                     + tracked noise floor (running low percentile)
-   ▼  Neural stage       small network predicts one gain per band
-   │                     inputs: log band energy + the DSP stage's SNR estimate
-   ▼  DSP back end       attack/release gain smoothing, gain floor,
-   │                     bands → bins interpolation, overlap-add ISTFT
-   ▼
-clean audio
-```
+![Signal flow: STFT, noise-floor tracker, a gain set by either a Wiener-style rule (spectral gate) or a neural network (hybrid), gain smoothing, then inverse STFT](docs/signal-flow.svg)
+
+Both cleaners share the STFT (512 / 128, sqrt-Hann), the noise-floor tracker (running low percentile), the gain smoothing and the overlap-add resynthesis. They differ only in what sets the gain: a fixed Wiener-style rule for the spectral gate (dashed box), or a small neural network for the hybrid (highlighted). The network's inputs are 40 mel band energies plus the DSP stage's own SNR estimate.
 
 The network only predicts 40 band gains (the RNNoise idea), not a full spectrogram, and looks at past frames only. That keeps it small and causal, so it can later run in real time inside a plugin.
 
