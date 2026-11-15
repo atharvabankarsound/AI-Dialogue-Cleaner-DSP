@@ -19,6 +19,8 @@
   --accent: #b4530a;
   --accent-soft: #fbe9d7;
   --good: #0f766e;
+  --upload: #15803d;
+  --upload-ink: #ffffff;
   --scope: #0b1118;
   --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
   --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
@@ -27,13 +29,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f151b; --surface: #172029; --ink: #e7ecf1; --muted: #94a2b0; --line: #2b3742;
-    --accent: #f0a03c; --accent-soft: #3a2a14; --good: #4fd1b5; --scope: #080c11;
+    --accent: #f0a03c; --accent-soft: #3a2a14; --good: #4fd1b5; --upload: #34b36b; --upload-ink: #06210f; --scope: #080c11;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f151b; --surface: #172029; --ink: #e7ecf1; --muted: #94a2b0; --line: #2b3742;
-  --accent: #f0a03c; --accent-soft: #3a2a14; --good: #4fd1b5; --scope: #080c11;
+  --accent: #f0a03c; --accent-soft: #3a2a14; --good: #4fd1b5; --upload: #34b36b; --upload-ink: #06210f; --scope: #080c11;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -55,10 +57,13 @@ section { display: flex; flex-direction: column; gap: 16px; }
 .sources { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sources span { font-size: 0.85rem; color: var(--muted); margin-right: 4px; }
 .chip, .file { font: 500 0.88rem var(--font-body); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
-.chip:hover, .file:hover { border-color: var(--accent); }
+.chip:hover { border-color: var(--accent); }
+.file { margin-left: auto; border-radius: 10px; border-color: var(--upload); background: var(--upload); color: var(--upload-ink); font-weight: 600; padding: 9px 16px; }
+.file:hover { filter: brightness(1.08); }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.file:focus-within, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .transport { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 #play { font: 600 0.95rem var(--font-body); min-width: 104px; padding: 10px 18px; border-radius: 10px; border: 0; background: var(--accent); color: var(--surface); cursor: pointer; }
