@@ -1,0 +1,5 @@
+# GitHub language stats: count only the Python source.
+# The web demo is a generated page plus a port of the Python code.
+docs/** linguist-generated
+web/** linguist-documentation
+*.json linguist-generated
