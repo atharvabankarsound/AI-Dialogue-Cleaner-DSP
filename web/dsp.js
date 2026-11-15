@@ -21,6 +21,19 @@ const DC = (() => {
     }
   }
 
+  function fftAny(re, im) {                     // forward FFT, any power-of-two length
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1, ang = -2 * Math.PI / size;
+      for (let s = 0; s < n; s += size) for (let k = 0; k < half; k++) {
+        const c = Math.cos(ang * k), sn = Math.sin(ang * k), a = s + k, b = a + half;
+        const tr = re[b] * c - im[b] * sn, ti = re[b] * sn + im[b] * c;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      }
+    }
+  }
+
   function stft(x) {
     const padded = new Float64Array(x.length + 2 * N); padded.set(x, N);
     const T = 1 + Math.floor((padded.length - N) / HOP);
@@ -105,9 +118,64 @@ const DC = (() => {
     return smoothGain(g, T, 0.3, 0.7, Math.pow(10, floorDb / 20));
   }
 
-  function process(x, model, gateFloorDb = -18, hybridFloorDb = -30) {
-    const S = stft(x), nf = noiseFloor(S.mag, S.T);
-    return { gate: istft(S, gateGain(S, nf, gateFloorDb), x.length), hybrid: istft(S, hybridGain(S, nf, model, hybridFloorDb), x.length) };
+  // analyse() does the heavy work once; render() applies the gains at a chosen amount (0..1).
+  function analyse(x, model, S, gateFloorDb = -18, hybridFloorDb = -30) {
+    S = S || stft(x); const nf = noiseFloor(S.mag, S.T);
+    return { S, length: x.length, gGate: gateGain(S, nf, gateFloorDb), gHybrid: hybridGain(S, nf, model, hybridFloorDb) };
+  }
+  function render(an, amount = 1) {
+    const blend = g => { if (amount >= 1) return g; const o = new Float32Array(g.length); for (let i = 0; i < g.length; i++) o[i] = 1 - amount * (1 - g[i]); return o; };
+    return { gate: istft(an.S, blend(an.gGate), an.length), hybrid: istft(an.S, blend(an.gHybrid), an.length) };
+  }
+  function process(x, model) { return render(analyse(x, model), 1); }
+
+  // ---- noise-type identification (port of dialogue_cleaner/noise_id.py) ----
+  function welchLow(x) {
+    const n = 2048, hop = 1024, F = x.length < n ? 1 : 1 + Math.floor((x.length - n) / hop);
+    const cols = Array.from({ length: 65 }, () => new Float32Array(F)), re = new Float64Array(n), im = new Float64Array(n);
+    for (let f = 0; f < F; f++) {
+      for (let i = 0; i < n; i++) { re[i] = (x[f * hop + i] || 0) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / n)); im[i] = 0; }
+      fftAny(re, im);
+      for (let k = 0; k < 65; k++) cols[k][f] = Math.hypot(re[k], im[k]);
+    }
+    return cols.map(c => c.sort()[Math.floor(0.2 * F)]);
+  }
+  function noiseFeatures(x, model, S) {
+    S = S || stft(x); const T = S.T, mag = S.mag, nf2 = new Float64Array(BINS), mean2 = new Float64Array(BINS), col = new Float32Array(T);
+    for (let k = 0; k < BINS; k++) {
+      let m = 0; for (let t = 0; t < T; t++) { const v = mag[t * BINS + k]; col[t] = v; m += v * v; }
+      mean2[k] = m / T; const q = Float32Array.from(col).sort()[Math.floor(0.1 * T)]; nf2[k] = q * q;
+    }
+    const f = new Float64Array(84); let ref = 0;
+    for (let b = 0; b < BANDS; b++) {
+      let a = 0, m = 0; for (let k = 0; k < BINS; k++) { const w = model.fb[b * BINS + k]; a += w * nf2[k]; m += w * mean2[k]; }
+      f[b] = Math.log10(a + 1e-10); f[BANDS + b] = Math.log10(m + 1e-10); ref += f[BANDS + b];
+    }
+    ref /= BANDS; for (let i = 0; i < 2 * BANDS; i++) f[i] -= ref;
+    const nb = Math.floor((T - 8) / 25), mins = new Float64Array(nb);
+    for (let b = 0; b < nb; b++) {
+      let mn = Infinity;
+      for (let t = 4 + b * 25; t < 4 + (b + 1) * 25; t++) { let e = 0; for (let k = 1; k < 10; k++) e += mag[t * BINS + k] ** 2; mn = Math.min(mn, Math.log10(e + 1e-10)); }
+      mins[b] = mn;
+    }
+    const mm = mins.reduce((a, v) => a + v, 0) / nb, srt = Float64Array.from(mins).sort();
+    f[80] = Math.sqrt(mins.reduce((a, v) => a + (v - mm) ** 2, 0) / nb);
+    f[81] = srt[Math.floor(0.9 * (nb - 1))] - srt[Math.floor(0.1 * (nb - 1))];
+    const P = welchLow(x), band = Float32Array.from(P.slice(3, 65)).sort(), med = (band[30] + band[31]) / 2 + 1e-10;
+    f[82] = Math.log10(band[61] / med + 1e-10);
+    f[83] = Math.max(...[50, 60].map(f0 => [1, 2, 3, 4].reduce((a, k) => a + Math.log10(P[Math.round(k * f0 / 7.8125)] / med + 1e-10), 0) / 4));
+    return f;
+  }
+  function identifyNoise(x, model, S) {
+    const nid = model.noiseId, f = noiseFeatures(x, model, S);
+    let h = Float32Array.from(f, (v, i) => (v - nid.mu[i]) / nid.sd[i]);
+    nid.layers.forEach((L, li) => {
+      const y = new Float32Array(L.nout);
+      for (let o = 0; o < L.nout; o++) { let s = L.b[o]; for (let i = 0; i < L.nin; i++) s += L.w[o * L.nin + i] * h[i]; y[o] = li < nid.layers.length - 1 ? Math.max(0, s) : s; }
+      h = y;
+    });
+    const mx = Math.max(...h), e = Array.from(h, v => Math.exp(v - mx)), sum = e.reduce((a, v) => a + v, 0);
+    return { features: f, probs: e.map(v => v / sum), ranked: e.map((v, i) => ({ label: nid.labels[i], index: i, p: v / sum })).sort((a, b) => b.p - a.p) };
   }
 
   function siSdr(est, ref) {
@@ -122,9 +190,11 @@ const DC = (() => {
   const f32 = b64 => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Float32Array(u.buffer); };
   const pcm = b64 => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); const p = new Int16Array(u.buffer), y = new Float32Array(p.length); for (let i = 0; i < p.length; i++) y[i] = p[i] / 32767; return y; };
   function loadModel(j) {
-    return { fb: f32(j.fb), fbNorm: f32(j.fbNorm), layers: j.layers.map(L => ({ w: f32(L.w), b: f32(L.b), nin: L.nin, nout: L.nout })),
+    const lay = Ls => Ls.map(L => ({ w: f32(L.w), b: f32(L.b), nin: L.nin, nout: L.nout }));
+    return { fb: f32(j.fb), fbNorm: f32(j.fbNorm), layers: lay(j.layers),
+             noiseId: j.noiseId && { labels: j.noiseId.labels, mu: f32(j.noiseId.mu), sd: f32(j.noiseId.sd), layers: lay(j.noiseId.layers) },
              examples: j.examples.map(e => ({ name: e.name, noisy: pcm(e.noisy), clean: pcm(e.clean) })) };
   }
-  return { SR, N, HOP, BINS, stft, process, siSdr, loadModel };
+  return { SR, N, HOP, BINS, stft, analyse, render, process, identifyNoise, siSdr, loadModel };
 })();
 if (typeof module !== "undefined") module.exports = DC;

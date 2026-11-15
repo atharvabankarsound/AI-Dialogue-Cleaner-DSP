@@ -67,7 +67,26 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .transport { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 #play { font: 600 0.95rem var(--font-body); min-width: 104px; padding: 10px 18px; border-radius: 10px; border: 0; background: var(--accent); color: var(--surface); cursor: pointer; }
-#play:disabled { opacity: 0.5; cursor: wait; }
+#play:disabled, #reduce:disabled { opacity: 0.5; cursor: wait; }
+#reduce, #dlgReduce { font: 600 0.95rem var(--font-body); padding: 10px 18px; border-radius: 10px; border: 0; background: var(--ink); color: var(--surface); cursor: pointer; }
+.amount { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; font-weight: 500; flex: 1 1 240px; }
+.amount input { flex: 1 1 120px; min-width: 100px; accent-color: var(--accent); }
+.amount output { min-width: 4ch; text-align: right; }
+.statusrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.noise-line { font: 500 0.85rem var(--font-body); padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; text-align: left; }
+.noise-line:hover { border-color: var(--accent); }
+dialog { width: min(440px, calc(100% - 32px)); border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--surface); color: var(--ink); }
+dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+dialog::backdrop { background: rgba(8, 12, 17, 0.55); }
+dialog h3 { margin: 0; font: 600 1.4rem var(--font-display); }
+.dlg-eyebrow { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+#dlgBars { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 0.88rem; }
+.bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar div { height: 100%; background: var(--accent); }
+.dlg-note { font-size: 0.82rem; color: var(--muted); }
+.dlg-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+#dlgClose { font: 500 0.95rem var(--font-body); padding: 10px 18px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
 #msg { font-size: 0.88rem; color: var(--muted); }
 #msg.error { color: var(--accent); font-weight: 500; }
 
@@ -125,11 +144,19 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
       </div>
       <div class="transport">
         <button id="play" type="button" disabled>Play</button>
+        <button id="reduce" type="button" disabled>Reduce Noise</button>
+        <label class="amount" for="amount">Amount
+          <input type="range" id="amount" min="0" max="100" step="5" value="100" disabled>
+          <output id="amountOut" for="amount" class="mono">100%</output>
+        </label>
+      </div>
+      <div class="statusrow">
         <span id="msg" role="status">Loading model…</span>
+        <button id="noiseLine" type="button" class="noise-line" hidden></button>
       </div>
       <div class="tracks" id="tracks"></div>
       <div class="axis mono"><span>0 s</span><span>Waveform above, spectrogram 0 to 8 kHz below</span><span id="dur"></span></div>
-      <p class="muted" style="font-size:0.85rem">Pick a version to switch while it plays; the position is kept, so you hear the same moment each way. Click a waveform or spectrogram to jump. Waveforms share one vertical scale, so you can see how much each version removes. Audio you upload is processed on this device as mono at 16 kHz, first 20 seconds only, and never leaves it.</p>
+      <p class="muted" style="font-size:0.85rem">Reduce Noise cleans the clip at the amount set on the slider: 100% is the full effect and 0% leaves the audio untouched. After an upload, a noise check names the most likely kind of noise. Pick a version to switch while it plays; the position is kept, so you hear the same moment each way. Click a waveform or spectrogram to jump. Waveforms share one vertical scale, so you can see how much each version removes. Audio you upload is processed on this device as mono at 16 kHz, first 20 seconds only, and never leaves it.</p>
     </div>
   </section>
 
@@ -228,6 +255,18 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
     </figure>
   </section>
 
+  <dialog id="noiseDlg" aria-labelledby="dlgTitle">
+    <p class="dlg-eyebrow" id="dlgTitle">Noise check</p>
+    <h3 id="dlgTop"></h3>
+    <p id="dlgTip"></p>
+    <div id="dlgBars"></div>
+    <p class="dlg-note">This is a best guess from a small neural classifier trained only on synthetic noise. It can be wrong on real recordings, and confident when it is wrong.</p>
+    <div class="dlg-actions">
+      <button id="dlgReduce" type="button">Reduce Noise</button>
+      <button id="dlgClose" type="button">Close</button>
+    </div>
+  </dialog>
+
   <footer>Hybrid Dialogue Cleaner. Python prototype with a matching JavaScript port for this page. © 2026 Atharva Bankar.</footer>
 </main>
 
@@ -238,11 +277,24 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const playBtn = $("play"), msg = $("msg"), tracksEl = $("tracks"), sourcesEl = $("sources");
-  let model, ctx, tracks = [], selected = 2, playing = false, offset = 0, startedAt = 0, node = null, duration = 0;
+  const playBtn = $("play"), reduceBtn = $("reduce"), amountEl = $("amount"), msg = $("msg"), tracksEl = $("tracks"), sourcesEl = $("sources"), dlg = $("noiseDlg");
+  let model, ctx, clip = null, tracks = [], selected = 0, playing = false, offset = 0, startedAt = 0, node = null, duration = 0;
+
+  const TIPS = [
+    "Steady hiss across all frequencies. Broadband reduction suits it well.",
+    "Steady broadband noise weighted toward the low end, like an empty room.",
+    "A steady tone at mains frequency and its harmonics.",
+    "Steady low-frequency noise such as air conditioning or traffic.",
+    "Low-frequency noise arriving in gusts. Gusts change quickly, so some may remain.",
+    "Other people talking behind the main voice. This is the hardest case for this cleaner.",
+    "The audio is limited to roughly 300 to 3,400 Hz, like a phone line. Noise reduction cannot restore the missing frequencies.",
+    "Very little steady noise was found. Reduction will change little.",
+  ];
 
   const say = (t, err) => { msg.textContent = t; msg.classList.toggle("error", !!err); };
   const audioCtx = () => ctx || (ctx = new (window.AudioContext || window.webkitAudioContext)());
+  const amount = () => Number(amountEl.value) / 100;
+  const pct = p => (p >= 0.995 ? "over 99" : Math.round(p * 100)) + "%";
 
   // colour ramp for spectrograms: navy -> teal -> amber -> near-white
   const stops = [[8, 12, 17], [22, 52, 84], [28, 120, 124], [240, 160, 60], [255, 244, 214]];
@@ -305,43 +357,82 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
     requestAnimationFrame(tick);
   }
 
-  function show(noisy, clean, label) {
-    playBtn.disabled = true; say("Cleaning " + label + "…");
-    if (playing) pause(); offset = 0;
-    setTimeout(() => {
-      const t0 = performance.now(), r = DC.process(noisy, model), ms = Math.round(performance.now() - t0);
-      const base = clean ? DC.siSdr(noisy, clean) : null;
-      const defs = [
-        { name: "Noisy input", sub: "The clip before any processing.", x: noisy, rgb: "236,128,96" },
-        { name: "Spectral gate", sub: "DSP only.", x: r.gate, rgb: "120,170,240" },
-        { name: "Hybrid", sub: "DSP plus neural band gains.", x: r.hybrid, rgb: "240,170,70" },
-      ];
-      if (clean) defs.push({ name: "Clean reference", sub: "The target, before noise was added.", x: clean, rgb: "110,210,170" });
-      let peak = 1e-4; for (let i = 0; i < noisy.length; i++) { const a = Math.abs(noisy[i]); if (a > peak) peak = a; }
-      tracksEl.textContent = ""; duration = noisy.length / DC.SR; $("dur").textContent = duration.toFixed(1) + " s";
-      tracks = defs.map((d, i) => {
-        const el = document.createElement("button"); el.type = "button"; el.className = "track";
-        const head = document.createElement("div"); head.className = "track-head";
-        const nm = document.createElement("span"); nm.className = "track-name"; nm.textContent = d.name;
-        const sb = document.createElement("span"); sb.className = "track-sub"; sb.textContent = d.sub;
-        head.append(nm, sb);
-        if (clean && i < 3) {
-          const s = DC.siSdr(d.x, clean), sc = document.createElement("span"); sc.className = "score mono";
-          sc.textContent = "SI-SDR " + s.toFixed(1) + " dB ";
-          if (i > 0) { const b = document.createElement("b"); b.textContent = (s - base >= 0 ? "+" : "") + (s - base).toFixed(1); sc.append(b); }
-          head.append(sc);
-        }
-        const scope = document.createElement("div"); scope.className = "scope";
-        const wv = document.createElement("canvas"), cv = document.createElement("canvas"), hd = document.createElement("div"); hd.className = "head"; wv.className = "wave";
-        scope.append(wv, cv, hd); el.append(head, scope); tracksEl.append(el); drawWave(wv, d.x, peak, d.rgb); drawSpec(cv, d.x);
-        el.addEventListener("click", e => {
-          if (e.target === cv || e.target === wv) { const b = scope.getBoundingClientRect(), wasPlaying = playing; offset = (e.clientX - b.left) / b.width * duration; selected = i; if (wasPlaying) start(); else render(); }
-          else select(i);
-        });
-        return { ...d, el, head: hd, buffer: null };
+  // Build the track list. `cleaned` is null until Reduce Noise has run on this clip.
+  function buildTracks(cleaned) {
+    const { noisy, clean } = clip, base = clean ? DC.siSdr(noisy, clean) : null;
+    const defs = [{ name: "Noisy input", sub: "The clip before any processing.", x: noisy, rgb: "236,128,96", scored: true }];
+    if (cleaned) defs.push(
+      { name: "Spectral gate", sub: "DSP only.", x: cleaned.gate, rgb: "120,170,240", scored: true },
+      { name: "Hybrid", sub: "DSP plus neural band gains.", x: cleaned.hybrid, rgb: "240,170,70", scored: true });
+    if (clean) defs.push({ name: "Clean reference", sub: "The target, before noise was added.", x: clean, rgb: "110,210,170" });
+    let peak = 1e-4; for (let i = 0; i < noisy.length; i++) { const a = Math.abs(noisy[i]); if (a > peak) peak = a; }
+    tracksEl.textContent = ""; duration = noisy.length / DC.SR; $("dur").textContent = duration.toFixed(1) + " s";
+    tracks = defs.map((d, i) => {
+      const el = document.createElement("button"); el.type = "button"; el.className = "track";
+      const head = document.createElement("div"); head.className = "track-head";
+      const nm = document.createElement("span"); nm.className = "track-name"; nm.textContent = d.name;
+      const sb = document.createElement("span"); sb.className = "track-sub"; sb.textContent = d.sub;
+      head.append(nm, sb);
+      if (clean && d.scored) {
+        const s = DC.siSdr(d.x, clean), sc = document.createElement("span"); sc.className = "score mono";
+        sc.textContent = "SI-SDR " + s.toFixed(1) + " dB ";
+        if (i > 0) { const b = document.createElement("b"); b.textContent = (s - base >= 0 ? "+" : "") + (s - base).toFixed(1); sc.append(b); }
+        head.append(sc);
+      }
+      const scope = document.createElement("div"); scope.className = "scope";
+      const wv = document.createElement("canvas"), cv = document.createElement("canvas"), hd = document.createElement("div"); hd.className = "head"; wv.className = "wave";
+      scope.append(wv, cv, hd); el.append(head, scope); tracksEl.append(el); drawWave(wv, d.x, peak, d.rgb); drawSpec(cv, d.x);
+      el.addEventListener("click", e => {
+        if (e.target === cv || e.target === wv) { const b = scope.getBoundingClientRect(), wasPlaying = playing; offset = (e.clientX - b.left) / b.width * duration; selected = i; if (wasPlaying) start(); else render(); }
+        else select(i);
       });
-      selected = 2; render(); playBtn.disabled = false;
-      say("Cleaned " + duration.toFixed(1) + " s of audio in " + ms + " ms.");
+      return { ...d, el, head: hd, buffer: null };
+    });
+    selected = cleaned ? 2 : 0; render();
+  }
+
+  function busy(on) { playBtn.disabled = reduceBtn.disabled = amountEl.disabled = on; }
+
+  function reduce() {
+    if (!clip) return;
+    if (playing) pause();
+    busy(true); say("Reducing noise…");
+    setTimeout(() => {
+      const t0 = performance.now(), keep = offset;
+      if (!clip.an) clip.an = DC.analyse(clip.noisy, model, clip.S);
+      buildTracks(DC.render(clip.an, amount()));
+      offset = keep; busy(false);
+      say("Noise reduced at " + amountEl.value + "% in " + Math.round(performance.now() - t0) + " ms. Move the slider to change the amount.");
+    }, 30);
+  }
+
+  function showNoise() {
+    const top = clip.id.ranked[0];
+    $("noiseLine").textContent = "Detected noise: " + top.label + " (" + pct(top.p) + "). Details";
+    $("noiseLine").hidden = false;
+    $("dlgTop").textContent = top.label;
+    $("dlgTip").textContent = TIPS[top.index];
+    const bars = $("dlgBars"); bars.textContent = "";
+    clip.id.ranked.slice(0, 3).forEach(r => {
+      const row = document.createElement("div"); row.className = "bar-row";
+      const l = document.createElement("span"); l.textContent = r.label;
+      const v = document.createElement("span"); v.className = "mono"; v.textContent = pct(r.p);
+      const b = document.createElement("div"); b.className = "bar"; const f = document.createElement("div"); f.style.width = Math.max(1, r.p * 100) + "%"; b.append(f);
+      row.append(l, v, b); bars.append(row);
+    });
+  }
+  function openDialog() { try { dlg.showModal(); } catch (e) { dlg.setAttribute("open", ""); } }
+  function closeDialog() { try { dlg.close(); } catch (e) { dlg.removeAttribute("open"); } }
+
+  function loadClip(noisy, clean, label, isUpload) {
+    if (playing) pause(); offset = 0;
+    busy(true); say("Analysing " + label + "…");
+    setTimeout(() => {
+      const S = DC.stft(noisy);
+      clip = { noisy, clean, label, S, an: null, id: DC.identifyNoise(noisy, model, S) };
+      showNoise();
+      if (isUpload) { buildTracks(null); busy(false); say("Loaded " + duration.toFixed(1) + " s. Set the amount and press Reduce Noise."); openDialog(); }
+      else reduce();
     }, 30);
   }
 
@@ -355,14 +446,20 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
       const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, Math.max(1, Math.floor(secs * DC.SR)), DC.SR);
       const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
       const x = (await off.startRendering()).getChannelData(0);
-      if (x.length < DC.SR / 2) throw new Error("short");
-      show(Float32Array.from(x), null, file.name);
+      if (x.length < DC.SR) throw new Error("short");
+      loadClip(Float32Array.from(x), null, file.name, true);
     } catch (e) {
-      say(e.message === "short" ? "That clip is under half a second. Choose a longer one." : "Could not read that file. Try a WAV or MP3.", true);
+      say(e.message === "short" ? "That clip is under one second. Choose a longer one." : "Could not read that file. Try a WAV or MP3.", true);
     }
   }
 
   playBtn.addEventListener("click", () => playing ? pause() : start());
+  reduceBtn.addEventListener("click", reduce);
+  amountEl.addEventListener("input", () => { $("amountOut").textContent = amountEl.value + "%"; });
+  amountEl.addEventListener("change", () => { if (clip && clip.an) reduce(); });
+  $("noiseLine").addEventListener("click", openDialog);
+  $("dlgClose").addEventListener("click", closeDialog);
+  $("dlgReduce").addEventListener("click", () => { closeDialog(); reduce(); });
   $("file").addEventListener("change", e => { if (e.target.files[0]) useFile(e.target.files[0]); e.target.value = ""; });
 
   setTimeout(() => {
@@ -370,10 +467,10 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--li
     const fileLabel = sourcesEl.querySelector(".file");
     model.examples.forEach((ex, i) => {
       const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = ex.name; b.setAttribute("aria-pressed", i === 0);
-      b.addEventListener("click", () => { pressSource(b); show(ex.noisy, ex.clean, ex.name.toLowerCase()); });
+      b.addEventListener("click", () => { pressSource(b); loadClip(ex.noisy, ex.clean, ex.name.toLowerCase(), false); });
       sourcesEl.insertBefore(b, fileLabel);
     });
-    show(model.examples[0].noisy, model.examples[0].clean, model.examples[0].name.toLowerCase());
+    loadClip(model.examples[0].noisy, model.examples[0].clean, model.examples[0].name.toLowerCase(), false);
     requestAnimationFrame(tick);
   }, 30);
 })();

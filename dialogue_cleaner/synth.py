@@ -45,6 +45,13 @@ def noise(kind, n, rng, sr=SR):
     elif kind == "hum":                              # mains hum + harmonics + hiss
         t = np.arange(n) / sr
         y = sum(np.sin(2 * np.pi * 50 * k * t + rng.uniform(0, 6)) / k for k in range(1, 8)) + 0.15 * w
+    elif kind == "hum60":                            # 60 Hz mains (used by the noise-type classifier)
+        t = np.arange(n) / sr
+        y = sum(np.sin(2 * np.pi * 60 * k * t + rng.uniform(0, 6)) / k for k in range(1, 8)) + 0.15 * w
+    elif kind == "wind":                             # low-frequency noise with strong slow gusts
+        b, a = butter(2, rng.uniform(120, 400) / (sr / 2)); y = lfilter(b, a, w)
+        b, a = butter(2, rng.uniform(0.5, 2.0) / (sr / 2)); g = lfilter(b, a, rng.standard_normal(n))
+        y *= 10 ** (rng.uniform(0.5, 0.9) * g / (np.std(g) + 1e-9))
     elif kind == "aircon":                           # low rumble, slowly fluctuating level
         b, a = butter(2, 400 / (sr / 2)); y = lfilter(b, a, w)
         y *= 1 + 0.5 * np.sin(2 * np.pi * 0.3 * np.arange(n) / sr)

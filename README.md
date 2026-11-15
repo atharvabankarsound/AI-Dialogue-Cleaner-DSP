@@ -55,10 +55,13 @@ Trains in about a minute on CPU, prints the table, and writes four WAVs and `spe
 
 `docs/index.html` is a single-file demo that runs the same algorithm in the browser (a JavaScript port in `web/dsp.js`, checked against the Python output to within 1e-7). It has three example clips, A/B switching between noisy, spectral gate, hybrid and clean, and lets you upload your own audio. With GitHub Pages enabled for the `docs/` folder it is served at https://atharvabankarsound.github.io/AI-Dialogue-Cleaner-DSP/.
 
+The page also has a Reduce Noise button with an amount slider (0 to 100%), and a noise check that names the most likely kind of noise in an uploaded clip: white noise / hiss, broadband room tone, mains hum, low rumble, wind, background voices, telephone-quality audio, or little or no noise. The check is a small neural classifier on hand-built DSP features (`dialogue_cleaner/noise_id.py`). It scores 99.7% on held-out synthetic clips, which says little about real recordings: it has only ever seen synthetic noise, so treat its answer as a best guess.
+
 Rebuild it after retraining:
 
 ```
-python export_web.py      # trains, writes web_model.json
+python export_web.py      # trains the cleaner, writes web_model.json
+python export_noise_id.py # trains the noise-type classifier, adds it to web_model.json
 python web/build.py       # writes docs/index.html
 ```
 
@@ -77,6 +80,7 @@ python web/build.py       # writes docs/index.html
 | `dialogue_cleaner/bands.py` | mel band layout shared by both stages |
 | `dialogue_cleaner/baseline.py` | spectral gate, noise-floor tracker, gain smoothing |
 | `dialogue_cleaner/hybrid.py` | features, ideal-ratio-mask target, hybrid cleaner |
+| `dialogue_cleaner/noise_id.py` | noise-type features and synthetic training clips |
 | `dialogue_cleaner/metrics.py` | SI-SDR, log-spectral distance |
 | `dialogue_cleaner/synth.py` | synthetic speech-like signal and noise generators |
 | `run_demo.py` | train, evaluate, export examples |
