@@ -62,7 +62,7 @@ Trains in about a minute on CPU, prints the table, and writes four WAVs and `spe
 
 ## Web demo
 
-`docs/index.html` is a single-file demo that runs the same algorithm in the browser (a JavaScript port in `web/dsp.js`, checked against the Python output to within 1e-7). It has three example clips, A/B switching between noisy, spectral gate, hybrid and clean, and lets you try your own file. With GitHub Pages enabled for the `docs/` folder it is served at https://atharvabankarsound.github.io/AI-Dialogue-Cleaner-DSP/.
+`docs/index.html` is a single-file demo that runs the same algorithm in the browser (a JavaScript port in `web/dsp.js`, checked against the Python output to within 1e-7). It has three example clips, A/B switching between noisy, spectral gate, hybrid and clean, and lets you upload your own audio. With GitHub Pages enabled for the `docs/` folder it is served at https://atharvabankarsound.github.io/AI-Dialogue-Cleaner-DSP/.
 
 Rebuild it after retraining:
 
